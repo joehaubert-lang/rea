@@ -1,0 +1,48 @@
+name: Verificar atualizacoes do REA
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Buscar atualizacoes
+        id: check
+        run: |
+          git remote add upstream https://github.com/morluto/rea.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main origin/main; then
+            echo "updates=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "updates=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Preparar atualizacao
+        if: steps.check.outputs.updates == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C upstream-sync origin/main
+          git merge --no-edit upstream/main
+          git push --force-with-lease origin upstream-sync
+
+      - name: Criar solicitacao de aprovacao
+        if: steps.check.outputs.updates == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh pr list --head upstream-sync --base main --state open --json number --jq '.[0].number' | grep -q '[0-9]'; then
+            gh pr create --base main --head upstream-sync --title "Atualizacoes do REA original" --body "Atualizacoes encontradas no morluto/rea. Revise antes de aprovar."
+          fi
